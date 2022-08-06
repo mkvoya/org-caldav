@@ -79,6 +79,11 @@ The file in `org-caldav-inbox' is implicitly included, so you
 don't have to add it here."
   :type '(repeat string))
 
+(defcustom org-caldav-ical-type-regex "VEVENT"
+  "Which kinds of ical types are considered.
+Options include `VEVENT', `VTODO', `V\\(EVENT\\|TODO\\)'."
+  :type 'string)
+
 (defcustom org-caldav-select-tags nil
   "List of tags to filter the synced tasks.
 If any such tag is found in a buffer, all items that do not carry
@@ -541,7 +546,8 @@ Return list with elements (uid . etag)."
 	(let ((status (plist-get (cdar output) 'DAV:status)))
 	  (if (eq status 200)
 	      ;; This is an empty directory
-	      'empty
+	      ;; 'empty
+	      '()
 	    (if status
 		(error "Error while getting eventlist from %s. Got status code: %d."
 		       (org-caldav-events-url) status)
@@ -759,11 +765,15 @@ Are you really sure? ")))
        (format "Cal UID %s: Deleted in Cal" (car cur)))
       (org-caldav-event-set-status cur 'deleted-in-cal))))
 
+(defun org-caldav--trim-left-todo (uid)
+  "Trim left `TODO-' from UID."
+  (replace-regexp-in-string "\\`TODO-" "" uid))
+
 (defun org-caldav-generate-md5-for-org-entry (uid)
   "Find Org entry with UID and calculate its MD5."
-  (let ((marker (org-id-find uid t)))
+  (let ((marker (org-id-find (org-caldav--trim-left-todo uid) t)))
     (when (null marker)
-      (error "Could not find UID %s." uid))
+      (error "Could not find UID %s (trimmed from %s)." (org-caldav--trim-left-todo uid) uid))
     (with-current-buffer (marker-buffer marker)
       (goto-char (marker-position marker))
       (md5 (buffer-substring-no-properties
@@ -776,6 +786,7 @@ Are you really sure? ")))
     (:url 'org-caldav-url)
     (:calendar-id 'org-caldav-calendar-id)
     (:files 'org-caldav-files)
+    (:type-regex 'org-caldav-ical-type-regex)
     (:select-tags 'org-caldav-select-tags)
     (:exclude-tags 'org-caldav-exclude-tags)
     (:inbox 'org-caldav-inbox)
@@ -1027,7 +1038,8 @@ org-icalendar."
 (defun org-caldav-maybe-fix-timezone ()
   "Fix the timezone if it is all uppercase.
 This is a bug in older Org versions."
-  (unless (null org-icalendar-timezone)
+  (unless (or (null org-icalendar-timezone)
+              (length org-icalendar-timezone))
     (save-excursion
       (goto-char (point-min))
       (while (search-forward (upcase org-icalendar-timezone) nil t)
@@ -1344,27 +1356,27 @@ Returns nil if there are no more events."
       (goto-char (point-min))
     (goto-char (point-max))
     (widen))
-  (if (null (search-forward "BEGIN:VEVENT" nil t))
+  (if (null (search-forward (concat "BEGIN:" org-caldav-ical-type-regex) nil t))
       (progn
 	;; No more events.
 	(widen)	nil)
     (beginning-of-line)
     (narrow-to-region (point)
 		      (save-excursion
-			(search-forward "END:VEVENT")
+			(search-forward (concat "END:" org-caldav-ical-type-regex))
 			(forward-line 1)
 			(point)))
     t))
 
 (defun org-caldav-narrow-event-under-point ()
   "Narrow ics event in the current buffer under point."
-  (unless (looking-at "BEGIN:VEVENT")
-    (when (null (search-backward "BEGIN:VEVENT" nil t))
+  (unless (looking-at (concat "BEGIN:" org-caldav-ical-type-regex))
+    (when (null (search-backward (concat "BEGIN:" org-caldav-ical-type-regex) nil t))
       (error "Cannot find event under point."))
     (beginning-of-line))
   (narrow-to-region (point)
 		    (save-excursion
-		      (search-forward "END:VEVENT")
+		      (search-forward (concat "END:" org-caldav-ical-type-regex))
 		      (forward-line 1)
 		      (point))))
 
@@ -1566,7 +1578,7 @@ If COMPLEMENT is non-nil, return all item without errors."
 	(when (and (eq org-caldav-show-sync-results 'with-headings)
 		   (not deleted))
 	  (insert "\n   Title: "
-		  (or (org-caldav-get-heading-from-uid (nth 1 entry))
+		  (or (org-caldav-get-heading-from-uid (org-caldav--trim-left-todo (nth 1 entry)))
 		      "(no title)")))
 	(insert "\n   Status: "
 		(symbol-name (nth 2 entry))
