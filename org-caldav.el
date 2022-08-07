@@ -1020,8 +1020,12 @@ The ics must be in the current buffer."
       (when seq
 	(setq seq (1+ seq))
 	(goto-char (point-min))
-	(re-search-forward "^SUMMARY:")
-	(forward-line)
+        (if (re-search-forward "^SEQUENCE:\\s-*\\([0-9]+\\)" nil t)
+            (progn
+              (beginning-of-line)
+              (kill-line))
+          (re-search-forward "^SUMMARY:")
+          (forward-line))
 	(beginning-of-line)
 	(insert "SEQUENCE:" (number-to-string seq) "\n")
 	(org-caldav-event-set-sequence event seq)))))
